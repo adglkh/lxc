@@ -712,31 +712,6 @@ func imagesPost(d *Daemon, r *http.Request) Response {
 			return err
 		}
 
-		// Check how many nodes already have this image
-		nodeAddresses := d.cluster.ImageGetNodesHasImage(info.Fingerprint)
-		var syncNodes int64
-		err := d.cluster.Transaction(func(tx *db.ClusterTx) error {
-			config, err := cluster.ConfigLoad(tx)
-			if err != nil {
-				return errors.Wrap(err, "Failed to load cluster configuration")
-			}
-			// TODO: which one should I use for the offline storage of image sync node count
-			syncNodes = tx.ImageSyncNodeCount()
-		})
-		if len(nodeAddresses) < syncNodes {
-			nodesInfo, err := chooseNodesForImageSync(nodeAddresses);
-			if err != nil {
-				return errors.Wrap(err, "Failed to choose node for image synchronization")
-			}
-			for _, node := range nodesInfo {
-				client, err := cluster.Connect(node.Address, d.endpoints.NetworkCert(), false)
-				if err != nil {
-					return errors.Wrap(err, "Failed to connect node for image synchronization")
-				}
-				client.CreateImage()
-			}
-		}
-
 		// Apply any provided alias
 		for _, alias := range req.Aliases {
 			_, _, err := d.cluster.ImageAliasGet(project, alias.Name, true)
@@ -764,6 +739,46 @@ func imagesPost(d *Daemon, r *http.Request) Response {
 		metadata["fingerprint"] = info.Fingerprint
 		metadata["size"] = strconv.FormatInt(info.Size, 10)
 		op.UpdateMetadata(metadata)
+
+		// Check how many nodes already have this image
+		nodeAddresses, err := d.cluster.ImageGetNodesHasImage(info.Fingerprint)
+		if err != nil {
+			return errors.Wrap(err, "Failed to get nodes for the image synchronization")
+		}
+
+		var syncNodeCount int64
+		err := d.cluster.Transaction(func(tx *db.ClusterTx) error {
+			config, err := cluster.ConfigLoad(tx)
+			if err != nil {
+				return errors.Wrap(err, "Failed to load cluster configuration")
+			}
+			syncNodeCount = config.ImageSyncNodeCount()
+		})
+		if len(nodeAddresses) < syncNodeCount {
+			nodeAddresses, err := d.cluster.ImageGetNodesHasNoImage()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get nodes for the image synchronization")
+			}
+
+			for _, address := range nodeAddresses {
+				client, err := cluster.Connect(address, d.endpoints.NetworkCert(), false)
+				if err != nil {
+					return errors.Wrap(err, "Failed to connect node for image synchronization")
+				}
+				op, err := client.CreateImage(req, nil)
+				if err != nil {
+					return err
+				}
+
+				err = op.Wait()
+				if err != nil {
+					return err
+				}
+				// opAPI := op.Get()
+				// Check the publish.go line:216
+			}
+		}
+
 		return nil
 	}
 
@@ -1932,47 +1947,4 @@ func imageRefresh(d *Daemon, r *http.Request) Response {
 	}
 
 	return OperationResponse(op)
-
-}
-
-func chooseNodesForImageSync(hasImageNodes []NodeInfo) ([]NodeInfo, error) {
-	nodesInfo, err = d.cluster.Transaction(func(tx *ClusterTx) ([]NodeInfo, error) {
-		nodes, err := tx.Nodes()
-		if err != nil {
-			return errors.Wrap(err, "Failed to fetch nodes")
-		}
-		if len(nodes) == 1 && nodes[0].Address == "0.0.0.0" {
-			// We're not clustered
-			return []NodeInfo{}, nil
-		}
-
-		return nodes
-	})
-
-	if err != nil {
-		return errors.Wrap(err, "Failed to fetch nodes")
-	}
-
-	// Only sync the image with the nodes which don't have the image stored before
-	var nodesForImageSync NodeInfo[]
-	for _, node := range nodesInfo {
-		stored := false
-		for _, imageNode := range hasImageNodes {
-			if imageNode.Address == node.Address {
-				stored = true
-			}
-		}
-
-		if !stored {
-			nodesForImageSync := append(nodesForImageSync, node)
-		}
-	}
-
-	// Sort the nodes according to the hearbeat
-	// The more responsive the node is, the higher priority the node comes
-	sort.Slice(nodesForImageSync, func(i, j int) bool {
-		return nodesForImageSync[i].Heartbeat > nodesInfo[j].Heartbeat
-	})
-
-	return nodesForImageSync, err
 }
