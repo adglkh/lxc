@@ -218,6 +218,7 @@ func configGet(cluster *db.Cluster) (*Config, error) {
 var ConfigSchema = config.Schema{
 	"backups.compression_algorithm":  {Default: "gzip", Validator: validateCompression},
 	"cluster.offline_threshold":      {Type: config.Int64, Default: offlineThresholdDefault(), Validator: offlineThresholdValidator},
+	"cluster.image_sync_nodes":       {Type: config.Int64, Default: "5"},
 	"core.https_allowed_headers":     {},
 	"core.https_allowed_methods":     {},
 	"core.https_allowed_origin":      {},
