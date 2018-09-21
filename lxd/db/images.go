@@ -889,3 +889,49 @@ func (c *Cluster) ImageUploadedAt(id int, uploadedAt time.Time) error {
 	err := exec(c.db, "UPDATE images SET upload_date=? WHERE id=?", uploadedAt, id)
 	return err
 }
+
+// ImageGetNodesWithImage returns the list of the address of online nodes
+// which already have the image.
+// Note: the local address is not included in the returned address list.
+func (c *Cluster) ImageGetNodesWithImage(fingerprint string) ([]string, error) {
+	stmt := `
+	SELECT nodes.address FROM nodes
+	  LEFT JOIN images_nodes ON images_nodes.node_id = nodes.id
+	  LEFT JOIN images ON images_nodes.image_id = images.id
+	WHERE images.fingerprint = ?
+	`
+	var localAddress string // Address of this node
+	var addresses []string  // Addresses of online nodes with the image
+
+	err := c.Transaction(func(tx *ClusterTx) error {
+		offlineThreshold, err := tx.NodeOfflineThreshold()
+		if err != nil {
+			return err
+		}
+
+		localAddress, err = tx.NodeAddress()
+		if err != nil {
+			return err
+		}
+		allAddresses, err := query.SelectStrings(tx.tx, stmt, fingerprint)
+		if err != nil {
+			return err
+		}
+		for _, address := range allAddresses {
+			node, err := tx.NodeByAddress(address)
+			if err != nil {
+				return err
+			}
+			if address == localAddress || node.IsOffline(offlineThreshold) {
+				continue
+			}
+			addresses = append(addresses, address)
+		}
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return addresses, nil
+}
