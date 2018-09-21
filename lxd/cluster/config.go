@@ -127,9 +127,9 @@ func (c *Config) OfflineThreshold() time.Duration {
 	return time.Duration(n) * time.Second
 }
 
-// ImageSyncNodes returns the numbers of nodes for images synchronization inside of cluster.
-func (c *Config) ImageSyncNodes() int64 {
-	return c.m.GetInt64("cluster.image_sync_nodes")
+// ImageSyncNodeCount returns the numbers of nodes for images synchronization inside of cluster.
+func (c *Config) ImageSyncNodeCount() int64 {
+	return c.m.GetInt64("cluster.image_sync_node_count")
 }
 
 // Dump current configuration keys and their values. Keys with values matching
@@ -223,7 +223,7 @@ func configGet(cluster *db.Cluster) (*Config, error) {
 var ConfigSchema = config.Schema{
 	"backups.compression_algorithm":  {Default: "gzip", Validator: validateCompression},
 	"cluster.offline_threshold":      {Type: config.Int64, Default: offlineThresholdDefault(), Validator: offlineThresholdValidator},
-	"cluster.image_sync_nodes":       {Type: config.Int64, Default: imageSyncNodesDefault()},
+	"cluster.image_sync_node_count":  {Type: config.Int64, Default: imageSyncNodeCountDefault(), Validator: imageSyncNodeCountValidator},
 	"core.https_allowed_headers":     {},
 	"core.https_allowed_methods":     {},
 	"core.https_allowed_origin":      {},
@@ -258,8 +258,8 @@ func offlineThresholdDefault() string {
 	return strconv.Itoa(db.DefaultOfflineThreshold)
 }
 
-func imageSyncNodesDefault() int64 {
-	return DefaultImageSyncNodes
+func imageSyncNodeCountDefault() string {
+	return strconv.Itoa(db.DefaultImageSyncNodeCount)
 }
 
 func offlineThresholdValidator(value string) error {
@@ -271,6 +271,17 @@ func offlineThresholdValidator(value string) error {
 	}
 	if threshold <= heartbeatInterval {
 		return fmt.Errorf("value must be greater than '%d'", heartbeatInterval)
+	}
+	return nil
+}
+
+func imageSyncNodeCountValidator(value string) error {
+	imageSyncNodeCount, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("image sync node count is not a number")
+	}
+	if imageSyncNodeCount < 0 {
+		return fmt.Errorf("value must be greater than or equal to 0")
 	}
 	return nil
 }

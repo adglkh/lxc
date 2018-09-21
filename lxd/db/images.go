@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/lxc/lxd/lxd/db/query"
@@ -890,6 +891,23 @@ func (c *Cluster) ImageUploadedAt(id int, uploadedAt time.Time) error {
 	return err
 }
 
+// ImageSyncNodeCount returns the number of nodes that needs to used for image synchronization.
+func (c *Cluster) ImageSyncNodeCount() error {
+	nodeCount := DefaultImageSyncNodeCount
+	values, err := query.SelectStrings(
+		c.tx, "SELECT value FROM config WHERE key='cluster.image_sync_node_count'")
+	if err != nil {
+		return 0, err
+	}
+	if len(values) > 0 {
+		nodeCount, err := strconv.Atoi(values[0])
+		if err != nil {
+			return 0, err
+		}
+	}
+	return nodeCount, nil
+}
+
 // ImageGetNodesHasImage returns the list of the address of online nodes
 // which already have the image.
 // Note: the local address is not included in the returned address list.
@@ -935,3 +953,7 @@ func (c *Cluster) ImageGetNodesHasImage(fingerprint string) ([]string, error) {
 
 	return addresses, nil
 }
+
+// DefaultImageSyncNodeCount is the default value for the numbers of nodes
+// for image synchronization
+const DefaultImageSyncNodeCount = 3

@@ -720,7 +720,8 @@ func imagesPost(d *Daemon, r *http.Request) Response {
 			if err != nil {
 				return errors.Wrap(err, "Failed to load cluster configuration")
 			}
-			syncNodes = config.ImageSyncNodes()
+			// TODO: which one should I use for the offline storage of image sync node count
+			syncNodes = tx.ImageSyncNodeCount()
 		})
 		if len(nodeAddresses) < syncNodes {
 			nodesInfo, err := chooseNodesForImageSync(nodeAddresses);
