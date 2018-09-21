@@ -890,10 +890,10 @@ func (c *Cluster) ImageUploadedAt(id int, uploadedAt time.Time) error {
 	return err
 }
 
-// ImageGetNodesWithImage returns the list of the address of online nodes
+// ImageGetNodesHasImage returns the list of the address of online nodes
 // which already have the image.
 // Note: the local address is not included in the returned address list.
-func (c *Cluster) ImageGetNodesWithImage(fingerprint string) ([]string, error) {
+func (c *Cluster) ImageGetNodesHasImage(fingerprint string) ([]string, error) {
 	stmt := `
 	SELECT nodes.address FROM nodes
 	  LEFT JOIN images_nodes ON images_nodes.node_id = nodes.id

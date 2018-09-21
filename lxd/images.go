@@ -712,6 +712,30 @@ func imagesPost(d *Daemon, r *http.Request) Response {
 			return err
 		}
 
+		// Check how many nodes already have this image
+		nodeAddresses := d.cluster.ImageGetNodesHasImage(info.Fingerprint)
+		var syncNodes int64
+		err := d.cluster.Transaction(func(tx *db.ClusterTx) error {
+			config, err := cluster.ConfigLoad(tx)
+			if err != nil {
+				return errors.Wrap(err, "Failed to load cluster configuration")
+			}
+			syncNodes = config.ImageSyncNodes()
+		})
+		if len(nodeAddresses) < syncNodes {
+			nodesInfo, err := chooseNodesForImageSync(nodeAddresses);
+			if err != nil {
+				return errors.Wrap(err, "Failed to choose node for image synchronization")
+			}
+			for _, node := range nodesInfo {
+				client, err := cluster.Connect(node.Address, d.endpoints.NetworkCert(), false)
+				if err != nil {
+					return errors.Wrap(err, "Failed to connect node for image synchronization")
+				}
+				client.CreateImage()
+			}
+		}
+
 		// Apply any provided alias
 		for _, alias := range req.Aliases {
 			_, _, err := d.cluster.ImageAliasGet(project, alias.Name, true)
@@ -1908,4 +1932,46 @@ func imageRefresh(d *Daemon, r *http.Request) Response {
 
 	return OperationResponse(op)
 
+}
+
+func chooseNodesForImageSync(hasImageNodes []NodeInfo) ([]NodeInfo, error) {
+	nodesInfo, err = d.cluster.Transaction(func(tx *ClusterTx) ([]NodeInfo, error) {
+		nodes, err := tx.Nodes()
+		if err != nil {
+			return errors.Wrap(err, "Failed to fetch nodes")
+		}
+		if len(nodes) == 1 && nodes[0].Address == "0.0.0.0" {
+			// We're not clustered
+			return []NodeInfo{}, nil
+		}
+
+		return nodes
+	})
+
+	if err != nil {
+		return errors.Wrap(err, "Failed to fetch nodes")
+	}
+
+	// Only sync the image with the nodes which don't have the image stored before
+	var nodesForImageSync NodeInfo[]
+	for _, node := range nodesInfo {
+		stored := false
+		for _, imageNode := range hasImageNodes {
+			if imageNode.Address == node.Address {
+				stored = true
+			}
+		}
+
+		if !stored {
+			nodesForImageSync := append(nodesForImageSync, node)
+		}
+	}
+
+	// Sort the nodes according to the hearbeat
+	// The more responsive the node is, the higher priority the node comes
+	sort.Slice(nodesForImageSync, func(i, j int) bool {
+		return nodesForImageSync[i].Heartbeat > nodesInfo[j].Heartbeat
+	})
+
+	return nodesForImageSync, err
 }

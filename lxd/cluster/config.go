@@ -127,6 +127,11 @@ func (c *Config) OfflineThreshold() time.Duration {
 	return time.Duration(n) * time.Second
 }
 
+// ImageSyncNodes returns the numbers of nodes for images synchronization inside of cluster.
+func (c *Config) ImageSyncNodes() int64 {
+	return c.m.GetInt64("cluster.image_sync_nodes")
+}
+
 // Dump current configuration keys and their values. Keys with values matching
 // their defaults are omitted.
 func (c *Config) Dump() map[string]interface{} {
@@ -218,7 +223,7 @@ func configGet(cluster *db.Cluster) (*Config, error) {
 var ConfigSchema = config.Schema{
 	"backups.compression_algorithm":  {Default: "gzip", Validator: validateCompression},
 	"cluster.offline_threshold":      {Type: config.Int64, Default: offlineThresholdDefault(), Validator: offlineThresholdValidator},
-	"cluster.image_sync_nodes":       {Type: config.Int64, Default: "5"},
+	"cluster.image_sync_nodes":       {Type: config.Int64, Default: imageSyncNodesDefault()},
 	"core.https_allowed_headers":     {},
 	"core.https_allowed_methods":     {},
 	"core.https_allowed_origin":      {},
@@ -251,6 +256,10 @@ var ConfigSchema = config.Schema{
 
 func offlineThresholdDefault() string {
 	return strconv.Itoa(db.DefaultOfflineThreshold)
+}
+
+func imageSyncNodesDefault() int64 {
+	return DefaultImageSyncNodes
 }
 
 func offlineThresholdValidator(value string) error {
