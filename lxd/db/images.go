@@ -904,13 +904,13 @@ func (c *Cluster) ImageGetNodesHasNoImage(fingerprint string) ([]string, error) 
 	return c.getNodesByImageFingerprint(fingerprint, false)
 }
 
-func (c *Cluster) getNodesByImageFingerprint(fingerprint string, bool hasImage) ([]string, error) {
+func (c *Cluster) getNodesByImageFingerprint(fingerprint string, hasImage bool) ([]string, error) {
 	q := `
-	SELECT nodes.address FROM nodes
-	  LEFT JOIN images_nodes ON images_nodes.node_id = nodes.id
-	  LEFT JOIN images ON images_nodes.image_id %s images.id
-	WHERE images.fingerprint = ?
-	`
+SELECT nodes.address FROM nodes
+  LEFT JOIN images_nodes ON images_nodes.node_id = nodes.id
+  LEFT JOIN images ON images_nodes.image_id %s images.id
+WHERE images.fingerprint = ?
+`
 	var stmt string
 	if hasImage {
 		stmt = fmt.Sprintf(q, "=")
@@ -947,7 +947,6 @@ func (c *Cluster) getNodesByImageFingerprint(fingerprint string, bool hasImage) 
 		}
 		return err
 	})
-
 	return addresses, err
 }
 
