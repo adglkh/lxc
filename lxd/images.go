@@ -734,65 +734,9 @@ func imagesPost(d *Daemon, r *http.Request) Response {
 			}
 		}
 
-		// Check how many nodes already have this image
-		syncNodeAddresses, err := d.cluster.ImageGetNodesHasImage(info.Fingerprint)
-		if err != nil {
-			return errors.Wrap(err, "Failed to get nodes for the image synchronization")
-		}
-
-		var desiredSyncNodeCount int64
-		err = d.cluster.Transaction(func(tx *db.ClusterTx) error {
-			config, err := cluster.ConfigLoad(tx)
-			if err != nil {
-				return errors.Wrap(err, "Failed to load cluster configuration")
-			}
-			desiredSyncNodeCount = config.ImageSyncNodeCount()
-			return nil
-		})
-		nodeCount := desiredSyncNodeCount - int64(len(syncNodeAddresses))
-		if nodeCount > 0 {
-			addresses, err := d.cluster.ImageGetNodesHasNoImage(info.Fingerprint)
-			if err != nil {
-				return errors.Wrap(err, "Failed to get nodes for the image synchronization")
-			}
-
-			min := func(x, y int64) int64 {
-				if x > y {
-					return y
-				}
-				return x
-			}
-
-			for idx := int64(0); idx < min(int64(len(addresses)), nodeCount); idx++ {
-				client, err := cluster.Connect(addresses[idx], d.endpoints.NetworkCert(), false)
-				if err != nil {
-					return errors.Wrap(err, "Failed to connect node for image synchronization")
-				}
-
-				// We spread the image for the nodes inside of cluster and we need to double
-				// check if the image already exists since when one certain node is going to
-				// create an image it will goes into the same routine.
-				fingerprints, err := client.GetImageFingerprints()
-				if err != nil {
-					return errors.Wrap(err, "Failed to fetch container's all image finger prints")
-				}
-
-				for _, fingerprint := range fingerprints {
-					if info.Fingerprint == fingerprint {
-						continue
-					}
-				}
-
-				opImgCreation, err := client.CreateImage(req, nil)
-				if err != nil {
-					return err
-				}
-
-				err = opImgCreation.Wait()
-				if err != nil {
-					return err
-				}
-			}
+		// Sync the images between each node in the cluster on demand
+		if err := imageSyncBetweenNodes(d, req, info.Fingerprint, imageUpload, post); err != nil {
+			return errors.Wrapf(err, "Image sync bwtween nodes")
 		}
 
 		// Set the metadata
@@ -1968,4 +1912,82 @@ func imageRefresh(d *Daemon, r *http.Request) Response {
 	}
 
 	return OperationResponse(op)
+}
+
+func imageSyncBetweenNodes(d *Daemon, req api.ImagesPost, fingerprint string, imageUpload bool, file *os.File) error {
+	// Check how many nodes already have this image
+	syncNodeAddresses, err := d.cluster.ImageGetNodesHasImage(fingerprint)
+	if err != nil {
+		return errors.Wrap(err, "Failed to get nodes for the image synchronization")
+	}
+
+	var desiredSyncNodeCount int64
+	err = d.cluster.Transaction(func(tx *db.ClusterTx) error {
+		config, err := cluster.ConfigLoad(tx)
+		if err != nil {
+			return errors.Wrap(err, "Failed to load cluster configuration")
+		}
+		desiredSyncNodeCount = config.ImageSyncNodeCount()
+		return nil
+	})
+	nodeCount := desiredSyncNodeCount - int64(len(syncNodeAddresses))
+	if nodeCount > 0 {
+		addresses, err := d.cluster.ImageGetNodesHasNoImage(fingerprint)
+		if err != nil {
+			return errors.Wrap(err, "Failed to get nodes for the image synchronization")
+		}
+
+		min := func(x, y int64) int64 {
+			if x > y {
+				return y
+			}
+			return x
+		}
+
+		for idx := int64(0); idx < min(int64(len(addresses)), nodeCount); idx++ {
+			client, err := cluster.Connect(addresses[idx], d.endpoints.NetworkCert(), false)
+			if err != nil {
+				return errors.Wrap(err, "Failed to connect node for image synchronization")
+			}
+
+			// We spread the image for the nodes inside of cluster and we need to double
+			// check if the image already exists since when one certain node is going to
+			// create an image it will goes into the same routine.
+			fingerprints, err := client.GetImageFingerprints()
+			if err != nil {
+				return errors.Wrap(err, "Failed to fetch container's all image finger prints")
+			}
+
+			for _, imgFingerprint := range fingerprints {
+				if fingerprint == imgFingerprint {
+					continue
+				}
+			}
+
+			createArgs := &lxd.ImageCreateArgs{}
+			image := api.ImagesPost{}
+			if imageUpload {
+				createArgs = &lxd.ImageCreateArgs{
+					MetaFile: file,
+					MetaName: filepath.Base(file.Name()),
+				}
+				image.Filename = createArgs.MetaName
+			} else {
+				image = req
+				createArgs = nil
+			}
+
+			op, err := client.CreateImage(image, createArgs)
+			if err != nil {
+				return err
+			}
+
+			err = op.Wait()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
